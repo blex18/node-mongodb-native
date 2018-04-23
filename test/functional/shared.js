@@ -39,6 +39,29 @@ function setupDatabase(configuration, dbsToClean) {
     );
 }
 
+function makeCleanupFn(client) {
+  return function(err) {
+    return new Promise((resolve, reject) => {
+      client.close(closeErr => {
+        const finalErr = err || closeErr;
+        if (finalErr) {
+          return reject(finalErr);
+        }
+        return resolve();
+      });
+    });
+  };
+}
+
+function withClient(client, operation, errorHandler) {
+  const cleanup = makeCleanupFn(client);
+
+  return client
+    .connect()
+    .then(operation, errorHandler)
+    .then(() => cleanup(), cleanup);
+}
+
 var assert = {
   equal: function(a, b) {
     expect(a).to.equal(b);
@@ -77,5 +100,6 @@ module.exports = {
   connectToDb: connectToDb,
   setupDatabase: setupDatabase,
   assert: assert,
-  delay: delay
+  delay: delay,
+  withClient
 };
