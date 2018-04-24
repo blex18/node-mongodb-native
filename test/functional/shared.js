@@ -42,13 +42,17 @@ function setupDatabase(configuration, dbsToClean) {
 function makeCleanupFn(client) {
   return function(err) {
     return new Promise((resolve, reject) => {
-      client.close(closeErr => {
-        const finalErr = err || closeErr;
-        if (finalErr) {
-          return reject(finalErr);
-        }
-        return resolve();
-      });
+      try {
+        client.close(closeErr => {
+          const finalErr = err || closeErr;
+          if (finalErr) {
+            return reject(finalErr);
+          }
+          return resolve();
+        });
+      } catch (e) {
+        return reject(err || e);
+      }
     });
   };
 }
