@@ -6,6 +6,7 @@ const ScramSHA256 = require('mongodb-core').ScramSHA256;
 const MongoError = require('mongodb-core').MongoError;
 const setupDatabase = require('./shared').setupDatabase;
 const withClient = require('./shared').withClient;
+const MongoClient = require('../../lib/mongo_client');
 
 describe('SCRAM-SHA-256 auth', function() {
   const test = {};
@@ -30,6 +31,10 @@ describe('SCRAM-SHA-256 auth', function() {
     }
   };
 
+  function makeConnectionString(config, username, password) {
+    return `mongodb://${username}:${password}@${config.host}:${config.port}/${config.db}?`;
+  }
+
   const users = Object.keys(userMap).map(name => userMap[name]);
 
   afterEach(() => test.sandbox.restore());
@@ -41,7 +46,9 @@ describe('SCRAM-SHA-256 auth', function() {
 
   before(function() {
     return withClient(this.configuration.newClient(), client => {
-      const db = client.db('admin');
+      test.oldDbName = this.configuration.db;
+      this.configuration.db = 'admin';
+      const db = client.db(this.configuration.db);
 
       const createUserCommands = users.map(user => ({
         createUser: user.username,
@@ -56,7 +63,8 @@ describe('SCRAM-SHA-256 auth', function() {
 
   after(function() {
     return withClient(this.configuration.newClient(), client => {
-      const db = client.db('admin');
+      const db = client.db(this.configuration.db);
+      this.configuration.db = test.oldDbName;
 
       return Promise.all(users.map(user => db.removeUser(user.username)));
     });
@@ -76,11 +84,31 @@ describe('SCRAM-SHA-256 auth', function() {
             user: user.username,
             password: user.password,
             authMechanism: mechanism,
-            authSource: 'admin'
+            authSource: this.configuration.db
           };
 
           return withClient(this.configuration.newClient(options), client => {
-            return client.db('admin').stats();
+            return client.db(this.configuration.db).stats();
+          });
+        }
+      });
+
+      it(`should auth ${user.description} when explicitly specifying ${mechanism} in url`, {
+        metadata: { requires: { mongodb: '>=3.7.3' } },
+        test: function() {
+          const username = encodeURIComponent(user.username);
+          const password = encodeURIComponent(user.password);
+
+          const url = `${makeConnectionString(
+            this.configuration,
+            username,
+            password
+          )}authMechanism=${mechanism}`;
+
+          const client = new MongoClient(url);
+
+          return withClient(client, client => {
+            return client.db(this.configuration.db).stats();
           });
         }
       });
@@ -92,11 +120,26 @@ describe('SCRAM-SHA-256 auth', function() {
         const options = {
           user: user.username,
           password: user.password,
-          authSource: 'admin'
+          authSource: this.configuration.db
         };
 
         return withClient(this.configuration.newClient(options), client => {
-          return client.db('admin').stats();
+          return client.db(this.configuration.db).stats();
+        });
+      }
+    });
+
+    it(`should auth ${user.description} using mechanism negotiaton and url`, {
+      metadata: { requires: { mongodb: '>=3.7.3' } },
+      test: function() {
+        const username = encodeURIComponent(user.username);
+        const password = encodeURIComponent(user.password);
+        const url = makeConnectionString(this.configuration, username, password);
+
+        const client = new MongoClient(url);
+
+        return withClient(client, client => {
+          return client.db(this.configuration.db).stats();
         });
       }
     });
@@ -110,7 +153,7 @@ describe('SCRAM-SHA-256 auth', function() {
       const options = {
         user: userMap.both.username,
         password: userMap.both.password,
-        authSource: 'admin'
+        authSource: this.configuration.db
       };
 
       test.sandbox.spy(ScramSHA256.prototype, 'auth');
@@ -129,7 +172,7 @@ describe('SCRAM-SHA-256 auth', function() {
       const options = {
         user: userMap.sha256.username,
         password: userMap.sha256.password,
-        authSource: 'admin',
+        authSource: this.configuration.db,
         authMechanism: 'SCRAM-SHA-1'
       };
 
